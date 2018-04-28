@@ -33,6 +33,7 @@
 
 #include "ngtcp2_mem.h"
 #include "ngtcp2_range.h"
+#include "ngtcp2_skl.h"
 
 struct ngtcp2_rob_gap;
 typedef struct ngtcp2_rob_gap ngtcp2_rob_gap;
@@ -42,12 +43,8 @@ typedef struct ngtcp2_rob_gap ngtcp2_rob_gap;
  * data that is not received yet.
  */
 struct ngtcp2_rob_gap {
-  /* next points to the next gap.  This singly linked list is ordered
-     by range.begin in the increasing order, and they never
-     overlap. */
-  ngtcp2_rob_gap *next;
-  /* range is the range of this gap. */
-  ngtcp2_range range;
+  ngtcp2_skl_node node;
+  size_t level;
 };
 
 /*
@@ -63,7 +60,7 @@ struct ngtcp2_rob_gap {
  *     Out of memory.
  */
 int ngtcp2_rob_gap_new(ngtcp2_rob_gap **pg, uint64_t begin, uint64_t end,
-                       ngtcp2_mem *mem);
+                       size_t level, ngtcp2_mem *mem);
 
 /*
  * ngtcp2_rob_gap_del deallocates |g|.  It deallocates the memory
@@ -79,15 +76,12 @@ typedef struct ngtcp2_rob_data ngtcp2_rob_data;
  * ngtcp2_rob_data holds the buffered stream data.
  */
 struct ngtcp2_rob_data {
-  /* next points to the next data.  This singly linked list is ordered
-     by offset in the increasing order, and they never overlap. */
-  ngtcp2_rob_data *next;
+  ngtcp2_skl_node node;
   /* begin points to the buffer. */
   uint8_t *begin;
   /* end points to the one beyond of the last byte of the buffer */
   uint8_t *end;
-  /* offset is a stream offset of begin. */
-  uint64_t offset;
+  size_t level;
 };
 
 /*
@@ -105,7 +99,7 @@ struct ngtcp2_rob_data {
  *     Out of memory.
  */
 int ngtcp2_rob_data_new(ngtcp2_rob_data **pd, uint64_t offset, size_t chunk,
-                        ngtcp2_mem *mem);
+                        size_t level, ngtcp2_mem *mem);
 
 /*
  * ngtcp2_rob_data_del deallocates |d|.  It deallocates the memory
@@ -121,10 +115,10 @@ void ngtcp2_rob_data_del(ngtcp2_rob_data *d, ngtcp2_mem *mem);
 typedef struct {
   /* gap maintains the range of offset which is not received
      yet. Initially, its range is [0, UINT64_MAX). */
-  ngtcp2_rob_gap *gap;
+  ngtcp2_skl gapskl;
   /* data maintains the list of buffers which store received data
      ordered by stream offset. */
-  ngtcp2_rob_data *data;
+  ngtcp2_skl dataskl;
   /* mem is custom memory allocator */
   ngtcp2_mem *mem;
   /* chunk is the size of each buffer in data field */
@@ -141,7 +135,8 @@ typedef struct {
  * NGTCP2_ERR_NOMEM
  *     Out of memory.
  */
-int ngtcp2_rob_init(ngtcp2_rob *rob, size_t chunk, ngtcp2_mem *mem);
+int ngtcp2_rob_init(ngtcp2_rob *rob, size_t chunk, ngtcp2_rnd *rnd,
+                    ngtcp2_mem *mem);
 
 /*
  * ngtcp2_rob_free frees resources allocated for |rob|.

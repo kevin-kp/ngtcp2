@@ -28,7 +28,7 @@
 
 int ngtcp2_strm_init(ngtcp2_strm *strm, uint64_t stream_id, uint32_t flags,
                      uint64_t max_rx_offset, uint64_t max_tx_offset,
-                     void *stream_user_data, ngtcp2_mem *mem) {
+                     ngtcp2_rnd *rnd, void *stream_user_data, ngtcp2_mem *mem) {
   int rv;
 
   strm->tx_offset = 0;
@@ -57,7 +57,7 @@ int ngtcp2_strm_init(ngtcp2_strm *strm, uint64_t stream_id, uint32_t flags,
     goto fail_gaptr_init;
   }
 
-  rv = ngtcp2_rob_init(&strm->rob, 8 * 1024, mem);
+  rv = ngtcp2_rob_init(&strm->rob, 8 * 1024, rnd, mem);
   if (rv != 0) {
     goto fail_rob_init;
   }

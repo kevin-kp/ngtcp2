@@ -153,6 +153,7 @@ static int conn_call_rand(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
                           ngtcp2_rand_ctx ctx) {
   int rv;
 
+  assert(conn->callbacks.rand);
   rv = conn->callbacks.rand(conn, dest, destlen, ctx, conn->user_data);
   if (rv != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -168,12 +169,24 @@ static int conn_new(ngtcp2_conn **pconn, const ngtcp2_cid *dcid,
                     int server) {
   int rv;
   ngtcp2_mem *mem = ngtcp2_mem_default();
+  unsigned short xsubi[3];
 
   *pconn = ngtcp2_mem_calloc(mem, 1, sizeof(ngtcp2_conn));
   if (*pconn == NULL) {
     rv = NGTCP2_ERR_NOMEM;
     goto fail_conn;
   }
+
+  /* Initializes minimum fields to call callback function. */
+  (*pconn)->callbacks = *callbacks;
+  (*pconn)->user_data = user_data;
+
+  rv = conn_call_rand(*pconn, (uint8_t *)xsubi, sizeof(xsubi),
+                      NGTCP2_RAND_CTX_SEED);
+  if (rv != 0) {
+    goto fail_init_xsubi;
+  }
+  ngtcp2_rnd_init(&(*pconn)->rnd, xsubi);
 
   (*pconn)->strm0 = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_strm));
   if ((*pconn)->strm0 == NULL) {
@@ -183,7 +196,7 @@ static int conn_new(ngtcp2_conn **pconn, const ngtcp2_cid *dcid,
   /* TODO Initial max_stream_data for stream 0? */
   rv = ngtcp2_strm_init((*pconn)->strm0, 0, NGTCP2_STRM_FLAG_NONE,
                         settings->max_stream_data, NGTCP2_STRM0_MAX_STREAM_DATA,
-                        NULL, mem);
+                        &(*pconn)->rnd, NULL, mem);
   if (rv != 0) {
     goto fail_strm0_init;
   }
@@ -233,10 +246,8 @@ static int conn_new(ngtcp2_conn **pconn, const ngtcp2_cid *dcid,
 
   ngtcp2_rtb_init(&(*pconn)->rtb, &(*pconn)->log, mem);
 
-  (*pconn)->callbacks = *callbacks;
   (*pconn)->version = version;
   (*pconn)->mem = mem;
-  (*pconn)->user_data = user_data;
   (*pconn)->largest_ack = -1;
   (*pconn)->local_settings = *settings;
   (*pconn)->unsent_max_rx_offset = (*pconn)->max_rx_offset = settings->max_data;
@@ -261,6 +272,7 @@ fail_strms_init:
 fail_strm0_init:
   ngtcp2_mem_free(mem, (*pconn)->strm0);
 fail_strm0_malloc:
+fail_init_xsubi:
   ngtcp2_mem_free(mem, *pconn);
 fail_conn:
   return rv;
@@ -2535,9 +2547,9 @@ static int conn_recv_server_stateless_retry(ngtcp2_conn *conn) {
     return NGTCP2_ERR_NOMEM;
   }
 
-  rv = ngtcp2_strm_init(strm0, 0, NGTCP2_STRM_FLAG_NONE,
-                        conn->local_settings.max_stream_data,
-                        NGTCP2_STRM0_MAX_STREAM_DATA, NULL, conn->mem);
+  rv = ngtcp2_strm_init(
+      strm0, 0, NGTCP2_STRM_FLAG_NONE, conn->local_settings.max_stream_data,
+      NGTCP2_STRM0_MAX_STREAM_DATA, &conn->rnd, NULL, conn->mem);
   if (rv != 0) {
     ngtcp2_mem_free(conn->mem, strm0);
     return rv;
@@ -3160,8 +3172,8 @@ int ngtcp2_conn_init_stream(ngtcp2_conn *conn, ngtcp2_strm *strm,
 
   rv = ngtcp2_strm_init(strm, stream_id, NGTCP2_STRM_FLAG_NONE,
                         conn->local_settings.max_stream_data,
-                        conn->remote_settings.max_stream_data, stream_user_data,
-                        conn->mem);
+                        conn->remote_settings.max_stream_data, &conn->rnd,
+                        stream_user_data, conn->mem);
   if (rv != 0) {
     ngtcp2_mem_free(conn->mem, strm);
     return rv;

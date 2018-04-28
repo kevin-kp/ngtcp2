@@ -53,6 +53,8 @@ set(ngtcp2_SOURCES
   ngtcp2_ringbuf.c
   ngtcp2_log.c
   ngtcp2_cid.c
+  ngtcp2_skl.c
+  ngtcp2_rnd.c
 )
 
 # Public shared library

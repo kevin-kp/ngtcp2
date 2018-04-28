@@ -59,6 +59,9 @@ typedef enum {
   NGTCP2_STRM_FLAG_STOP_SENDING = 0x10,
 } ngtcp2_strm_flags;
 
+struct ngtcp2_rnd;
+typedef struct ngtcp2_rnd ngtcp2_rnd;
+
 struct ngtcp2_strm;
 
 typedef struct ngtcp2_strm ngtcp2_strm;
@@ -105,7 +108,7 @@ struct ngtcp2_strm {
  */
 int ngtcp2_strm_init(ngtcp2_strm *strm, uint64_t stream_id, uint32_t flags,
                      uint64_t max_rx_offset, uint64_t max_tx_offset,
-                     void *stream_user_data, ngtcp2_mem *mem);
+                     ngtcp2_rnd *rnd, void *stream_user_data, ngtcp2_mem *mem);
 
 /*
  * ngtcp2_strm_free deallocates memory allocated for |strm|.  This

@@ -500,7 +500,12 @@ typedef enum {
    * NGTCP2_RAND_CTX_PATH_CHALLENGE indicates that random value is
    * used for PATH_CHALLENGE.
    */
-  NGTCP2_RAND_CTX_PATH_CHALLENGE
+  NGTCP2_RAND_CTX_PATH_CHALLENGE,
+  /**
+   * NGTCP2_RAND_CTX_SEED indicates that random value is used to seed
+   * pseudo random generator.
+   */
+  NGTCP2_RAND_CTX_SEED
 } ngtcp2_rand_ctx;
 
 #define NGTCP2_MAX_PKT_SIZE 65527

@@ -146,4 +146,10 @@ uint64_t read_pkt_payloadlen(const uint8_t *pkt, const ngtcp2_cid *dcid,
 void write_pkt_payloadlen(uint8_t *pkt, const ngtcp2_cid *dcid,
                           const ngtcp2_cid *scid, uint64_t payloadlen);
 
+/*
+ * static_rnd returns statically allocated pseudo random generator.
+ * The seed value is constant.
+ */
+ngtcp2_rnd *static_rnd(void);
+
 #endif /* NGTCP2_TEST_HELPER_H */

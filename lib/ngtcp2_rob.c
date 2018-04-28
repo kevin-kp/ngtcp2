@@ -30,14 +30,19 @@
 #include "ngtcp2_macro.h"
 
 int ngtcp2_rob_gap_new(ngtcp2_rob_gap **pg, uint64_t begin, uint64_t end,
-                       ngtcp2_mem *mem) {
-  *pg = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_rob_gap));
+                       size_t level, ngtcp2_mem *mem) {
+  ngtcp2_range range = {begin, end};
+
+  *pg = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_rob_gap) +
+                                   sizeof(ngtcp2_skl_node *) * (level + 1));
   if (*pg == NULL) {
     return NGTCP2_ERR_NOMEM;
   }
 
-  ngtcp2_range_init(&(*pg)->range, begin, end);
-  (*pg)->next = NULL;
+  ngtcp2_skl_node_init(
+      &(*pg)->node, &range, level,
+      (ngtcp2_skl_node **)(void *)((uint8_t *)(*pg) + sizeof(ngtcp2_rob_gap)));
+  (*pg)->level = level;
 
   return 0;
 }
@@ -47,16 +52,23 @@ void ngtcp2_rob_gap_del(ngtcp2_rob_gap *g, ngtcp2_mem *mem) {
 }
 
 int ngtcp2_rob_data_new(ngtcp2_rob_data **pd, uint64_t offset, size_t chunk,
-                        ngtcp2_mem *mem) {
-  *pd = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_rob_data) + chunk);
+                        size_t level, ngtcp2_mem *mem) {
+  ngtcp2_range range = {offset, offset + chunk};
+
+  *pd = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_rob_data) +
+                                   sizeof(ngtcp2_skl_node *) * (level + 1) +
+                                   chunk);
   if (*pd == NULL) {
     return NGTCP2_ERR_NOMEM;
   }
 
-  (*pd)->begin = (uint8_t *)(*pd) + sizeof(ngtcp2_rob_data);
+  ngtcp2_skl_node_init(
+      &(*pd)->node, &range, level,
+      (ngtcp2_skl_node **)(void *)((uint8_t *)(*pd) + sizeof(ngtcp2_rob_data)));
+  (*pd)->begin = (uint8_t *)(*pd) + sizeof(ngtcp2_rob_data) +
+                 sizeof(ngtcp2_skl_node *) * (level + 1);
   (*pd)->end = (*pd)->begin + chunk;
-  (*pd)->offset = offset;
-  (*pd)->next = NULL;
+  (*pd)->level = level;
 
   return 0;
 }
@@ -65,15 +77,23 @@ void ngtcp2_rob_data_del(ngtcp2_rob_data *d, ngtcp2_mem *mem) {
   ngtcp2_mem_free(mem, d);
 }
 
-int ngtcp2_rob_init(ngtcp2_rob *rob, size_t chunk, ngtcp2_mem *mem) {
+int ngtcp2_rob_init(ngtcp2_rob *rob, size_t chunk, ngtcp2_rnd *rnd,
+                    ngtcp2_mem *mem) {
   int rv;
+  ngtcp2_rob_gap *g;
 
-  rv = ngtcp2_rob_gap_new(&rob->gap, 0, UINT64_MAX, mem);
+  ngtcp2_skl_init(&rob->gapskl, 32, rnd, mem);
+
+  rv = ngtcp2_rob_gap_new(&g, 0, UINT64_MAX,
+                          ngtcp2_skl_rand_level(&rob->gapskl), mem);
   if (rv != 0) {
     return rv;
   }
 
-  rob->data = NULL;
+  ngtcp2_skl_insert(&rob->gapskl, &g->node, g->level);
+
+  ngtcp2_skl_init(&rob->dataskl, 19, rnd, mem);
+
   rob->chunk = chunk;
   rob->mem = mem;
 
@@ -81,40 +101,12 @@ int ngtcp2_rob_init(ngtcp2_rob *rob, size_t chunk, ngtcp2_mem *mem) {
 }
 
 void ngtcp2_rob_free(ngtcp2_rob *rob) {
-  ngtcp2_rob_gap *g, *ng;
-  ngtcp2_rob_data *d, *nd;
-
   if (rob == NULL) {
     return;
   }
 
-  for (g = rob->gap; g;) {
-    ng = g->next;
-    ngtcp2_rob_gap_del(g, rob->mem);
-    g = ng;
-  }
-  for (d = rob->data; d;) {
-    nd = d->next;
-    ngtcp2_rob_data_del(d, rob->mem);
-    d = nd;
-  }
-}
-
-static void insert_gap(ngtcp2_rob_gap **pg, ngtcp2_rob_gap *g) {
-  g->next = (*pg)->next;
-  (*pg)->next = g;
-}
-
-static void remove_gap(ngtcp2_rob_gap **pg, ngtcp2_mem *mem) {
-  ngtcp2_rob_gap *g = *pg;
-  *pg = g->next;
-  ngtcp2_rob_gap_del(g, mem);
-}
-
-static void remove_data(ngtcp2_rob_data **pd, ngtcp2_mem *mem) {
-  ngtcp2_rob_data *d = *pd;
-  *pd = d->next;
-  ngtcp2_rob_data_del(d, mem);
+  ngtcp2_skl_free(&rob->dataskl);
+  ngtcp2_skl_free(&rob->gapskl);
 }
 
 static int rob_write_data(ngtcp2_rob *rob, ngtcp2_rob_data **pd,
@@ -122,30 +114,44 @@ static int rob_write_data(ngtcp2_rob *rob, ngtcp2_rob_data **pd,
   size_t n;
   int rv;
   ngtcp2_rob_data *nd;
+  ngtcp2_skl_node *dn;
+  ngtcp2_range range = {offset, offset + len};
+  ngtcp2_skl_node *dpred[NGTCP2_SKL_MAX_LEVEL + 1];
+
+  if (*pd == NULL) {
+    dn = ngtcp2_skl_lower_bound(&rob->dataskl, dpred, &range);
+    if (dn) {
+      *pd = ngtcp2_struct_of(dn, ngtcp2_rob_data, node);
+    }
+  }
 
   for (;;) {
-    if (*pd == NULL || offset < (*pd)->offset) {
+    if (*pd == NULL || offset < (*pd)->node.range.begin) {
       rv = ngtcp2_rob_data_new(&nd, (offset / rob->chunk) * rob->chunk,
-                               rob->chunk, rob->mem);
+                               rob->chunk, ngtcp2_skl_rand_level(&rob->dataskl),
+                               rob->mem);
       if (rv != 0) {
         return rv;
       }
-      /* insert before *pd */
-      nd->next = *pd;
+      ngtcp2_skl_insert(&rob->dataskl, &nd->node, nd->level);
       *pd = nd;
-    } else if ((*pd)->offset + rob->chunk < offset) {
-      pd = &(*pd)->next;
-      continue;
+    } else if ((*pd)->node.range.begin + rob->chunk < offset) {
+      assert(0);
     }
-    n = ngtcp2_min(len, (*pd)->offset + rob->chunk - offset);
-    memcpy((*pd)->begin + (offset - (*pd)->offset), data, n);
+    n = ngtcp2_min(len, (*pd)->node.range.begin + rob->chunk - offset);
+    memcpy((*pd)->begin + (offset - (*pd)->node.range.begin), data, n);
     offset += n;
     data += n;
     len -= n;
     if (len == 0) {
       return 0;
     }
-    pd = &(*pd)->next;
+    dn = ngtcp2_skl_node_next(&(*pd)->node);
+    if (dn) {
+      *pd = ngtcp2_struct_of(dn, ngtcp2_rob_data, node);
+    } else {
+      *pd = NULL;
+    }
   }
 
   return 0;
@@ -154,111 +160,151 @@ static int rob_write_data(ngtcp2_rob *rob, ngtcp2_rob_data **pd,
 int ngtcp2_rob_push(ngtcp2_rob *rob, uint64_t offset, const uint8_t *data,
                     size_t datalen) {
   int rv;
-  ngtcp2_rob_gap **pg;
+  ngtcp2_rob_gap *g;
   ngtcp2_range m, l, r, q = {offset, offset + datalen};
-  ngtcp2_rob_data **pd = &rob->data;
+  ngtcp2_rob_data *d = NULL;
+  ngtcp2_skl_node *gn, *ngn;
+  ngtcp2_skl_node *gpred[NGTCP2_SKL_MAX_LEVEL + 1];
+  int stale = 0;
 
-  for (pg = &rob->gap; *pg;) {
-    m = ngtcp2_range_intersect(&q, &(*pg)->range);
-    if (ngtcp2_range_len(&m)) {
-      if (ngtcp2_range_equal(&(*pg)->range, &m)) {
-        remove_gap(pg, rob->mem);
-        rv = rob_write_data(rob, pd, m.begin, data + (m.begin - offset),
-                            ngtcp2_range_len(&m));
-        if (rv != 0) {
-          return rv;
-        }
-        continue;
-      }
-      ngtcp2_range_cut(&l, &r, &(*pg)->range, &m);
-      if (ngtcp2_range_len(&l)) {
-        (*pg)->range = l;
+  gn = ngtcp2_skl_lower_bound(&rob->gapskl, gpred, &q);
+  if (!gn) {
+    return 0;
+  }
+  for (;;) {
+    g = ngtcp2_struct_of(gn, ngtcp2_rob_gap, node);
 
-        if (ngtcp2_range_len(&r)) {
-          ngtcp2_rob_gap *ng;
-          rv = ngtcp2_rob_gap_new(&ng, r.begin, r.end, rob->mem);
-          if (rv != 0) {
-            return rv;
-          }
-          insert_gap(pg, ng);
-          pg = &((*pg)->next);
-        }
-      } else if (ngtcp2_range_len(&r)) {
-        (*pg)->range = r;
+    m = ngtcp2_range_intersect(&q, &gn->range);
+    if (!ngtcp2_range_len(&m)) {
+      break;
+    }
+    if (ngtcp2_range_equal(&gn->range, &m)) {
+      ngn = ngtcp2_skl_node_next(gn);
+      if (stale) {
+        ngtcp2_skl_lower_bound(&rob->gapskl, gpred, &q);
       }
-      rv = rob_write_data(rob, pd, m.begin, data + (m.begin - offset),
+      ngtcp2_skl_remove(&rob->gapskl, gn, gpred);
+      ngtcp2_rob_gap_del(g, rob->mem);
+      rv = rob_write_data(rob, &d, m.begin, data + (m.begin - offset),
                           ngtcp2_range_len(&m));
       if (rv != 0) {
         return rv;
       }
+      gn = ngn;
+      stale = 1;
+      continue;
     }
-    if (ngtcp2_range_not_after(&q, &(*pg)->range)) {
+    ngtcp2_range_cut(&l, &r, &gn->range, &m);
+    if (ngtcp2_range_len(&l)) {
+      gn->range = l;
+
+      if (ngtcp2_range_len(&r)) {
+        ngtcp2_rob_gap *ng;
+        rv = ngtcp2_rob_gap_new(&ng, r.begin, r.end,
+                                ngtcp2_skl_rand_level(&rob->gapskl), rob->mem);
+        if (rv != 0) {
+          return rv;
+        }
+        ngtcp2_skl_insert(&rob->gapskl, &ng->node, ng->level);
+      }
+    } else if (ngtcp2_range_len(&r)) {
+      gn->range = r;
+    }
+    rv = rob_write_data(rob, &d, m.begin, data + (m.begin - offset),
+                        ngtcp2_range_len(&m));
+    if (rv != 0) {
+      return rv;
+    }
+    gn = ngtcp2_skl_node_next(gn);
+    if (!gn) {
       break;
     }
-    pg = &((*pg)->next);
+    stale = 1;
   }
   return 0;
 }
 
 void ngtcp2_rob_remove_prefix(ngtcp2_rob *rob, uint64_t offset) {
-  ngtcp2_rob_gap **pg;
-  ngtcp2_rob_data **pd;
+  ngtcp2_skl_node *gn, *dn;
 
-  for (pg = &rob->gap; *pg;) {
-    if (offset <= (*pg)->range.begin) {
+  for (;;) {
+    gn = ngtcp2_skl_front(&rob->gapskl);
+    if (!gn) {
       break;
     }
-    if (offset < (*pg)->range.end) {
-      (*pg)->range.begin = offset;
+    if (offset <= gn->range.begin) {
       break;
     }
-    remove_gap(pg, rob->mem);
+    if (offset < gn->range.end) {
+      gn->range.begin = offset;
+      break;
+    }
+    ngtcp2_skl_pop_front(&rob->gapskl);
+    ngtcp2_rob_gap_del(ngtcp2_struct_of(gn, ngtcp2_rob_gap, node), rob->mem);
   }
 
-  for (pd = &rob->data; *pd;) {
-    if (offset <= (*pd)->offset) {
+  for (;;) {
+    dn = ngtcp2_skl_front(&rob->dataskl);
+    if (!dn) {
       return;
     }
-    if (offset < (*pd)->offset + rob->chunk) {
+    if (offset <= dn->range.begin) {
       return;
     }
-    remove_data(pd, rob->mem);
+    if (offset < dn->range.begin + rob->chunk) {
+      return;
+    }
+    ngtcp2_skl_pop_front(&rob->dataskl);
+    ngtcp2_rob_data_del(ngtcp2_struct_of(dn, ngtcp2_rob_data, node), rob->mem);
   }
 }
 
 size_t ngtcp2_rob_data_at(ngtcp2_rob *rob, const uint8_t **pdest,
                           uint64_t offset) {
-  ngtcp2_rob_gap *g = rob->gap;
-  ngtcp2_rob_data *d = rob->data;
+  ngtcp2_rob_data *d;
+  ngtcp2_skl_node *gn, *dn;
 
-  if (g->range.begin <= offset) {
+  gn = ngtcp2_skl_front(&rob->gapskl);
+  if (!gn) {
     return 0;
   }
 
-  assert(d);
-  assert(d->offset <= offset);
-  assert(offset < d->offset + rob->chunk);
+  if (gn->range.begin <= offset) {
+    return 0;
+  }
 
-  *pdest = d->begin + (offset - d->offset);
+  dn = ngtcp2_skl_front(&rob->dataskl);
 
-  return ngtcp2_min(g->range.begin, d->offset + rob->chunk) - offset;
+  assert(dn);
+
+  assert(dn->range.begin <= offset);
+  assert(offset < dn->range.begin + rob->chunk);
+
+  d = ngtcp2_struct_of(dn, ngtcp2_rob_data, node);
+
+  *pdest = d->begin + (offset - dn->range.begin);
+
+  return ngtcp2_min(gn->range.begin, dn->range.begin + rob->chunk) - offset;
 }
 
 void ngtcp2_rob_pop(ngtcp2_rob *rob, uint64_t offset, size_t len) {
-  ngtcp2_rob_data **pd = &rob->data;
+  ngtcp2_skl_node *dn = ngtcp2_skl_front(&rob->dataskl);
 
-  assert(*pd);
+  assert(dn);
 
-  if (offset + len < (*pd)->offset + rob->chunk) {
+  if (offset + len < dn->range.begin + rob->chunk) {
     return;
   }
 
-  remove_data(pd, rob->mem);
+  ngtcp2_skl_pop_front(&rob->dataskl);
+  ngtcp2_rob_data_del(ngtcp2_struct_of(dn, ngtcp2_rob_data, node), rob->mem);
 }
 
 uint64_t ngtcp2_rob_first_gap_offset(ngtcp2_rob *rob) {
-  if (rob->gap) {
-    return rob->gap->range.begin;
+  ngtcp2_skl_node *gn = ngtcp2_skl_front(&rob->gapskl);
+
+  if (!gn) {
+    return UINT64_MAX;
   }
-  return UINT64_MAX;
+  return gn->range.begin;
 }

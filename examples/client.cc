@@ -546,6 +546,15 @@ ssize_t do_decrypt(ngtcp2_conn *conn, uint8_t *dest, size_t destlen,
 }
 } // namespace
 
+namespace {
+int rand(ngtcp2_conn *conn, uint8_t *dest, size_t destlen, ngtcp2_rand_ctx ctx,
+         void *user_data) {
+  auto dis = std::uniform_int_distribution<uint8_t>(0, 255);
+  std::generate(dest, dest + destlen, [&dis]() { return dis(randgen); });
+  return 0;
+}
+} // namespace
+
 int Client::init(int fd, const Address &remote_addr, const char *addr,
                  int datafd, uint32_t version) {
   int rv;
@@ -639,6 +648,7 @@ int Client::init(int fd, const Address &remote_addr, const char *addr,
       nullptr, // recv_stateless_reset,
       recv_server_stateless_retry,
       extend_max_stream_id,
+      rand,
   };
 
   auto dis = std::uniform_int_distribution<uint8_t>(

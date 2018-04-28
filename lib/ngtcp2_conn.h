@@ -41,6 +41,7 @@
 #include "ngtcp2_str.h"
 #include "ngtcp2_pkt.h"
 #include "ngtcp2_log.h"
+#include "ngtcp2_rnd.h"
 
 typedef enum {
   /* Client specific handshake states */
@@ -188,6 +189,7 @@ struct ngtcp2_conn {
      check that duplicated Initial or 0-RTT packet are indeed sent to
      this connection. */
   ngtcp2_cid rcid;
+  ngtcp2_rnd rnd;
   ngtcp2_strm *strm0;
   ngtcp2_map strms;
   ngtcp2_strm *fc_strms;

@@ -281,6 +281,7 @@ static void setup_default_server(ngtcp2_conn **pconn) {
   cb.decrypt = null_decrypt;
   cb.encrypt = null_encrypt;
   cb.recv_stream0_data = recv_stream0_data;
+  cb.rand = genrand;
   server_default_settings(&settings);
 
   ngtcp2_conn_server_new(pconn, &dcid, &scid, NGTCP2_PROTO_VER_MAX, &cb,
@@ -319,6 +320,7 @@ static void setup_default_client(ngtcp2_conn **pconn) {
   cb.decrypt = null_decrypt;
   cb.encrypt = null_encrypt;
   cb.recv_stream0_data = recv_stream0_data;
+  cb.rand = genrand;
   client_default_settings(&settings);
 
   ngtcp2_conn_client_new(pconn, &dcid, &scid, NGTCP2_PROTO_VER_MAX, &cb,
@@ -381,6 +383,7 @@ static void setup_handshake_client(ngtcp2_conn **pconn) {
   cb.recv_stream0_data = recv_stream0_data;
   cb.hs_decrypt = null_decrypt;
   cb.hs_encrypt = null_encrypt;
+  cb.rand = genrand;
   client_default_settings(&settings);
 
   ngtcp2_conn_client_new(pconn, &rcid, &scid, NGTCP2_PROTO_VER_MAX, &cb,
@@ -445,6 +448,7 @@ static void setup_early_client(ngtcp2_conn **pconn) {
   cb.hs_encrypt = null_encrypt;
   cb.decrypt = null_decrypt;
   cb.encrypt = null_encrypt;
+  cb.rand = genrand;
   client_default_settings(&settings);
 
   ngtcp2_conn_client_new(pconn, &dcid, &scid, NGTCP2_PROTO_VER_MAX, &cb,

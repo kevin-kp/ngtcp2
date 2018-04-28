@@ -29,110 +29,113 @@
 #include "ngtcp2_rob.h"
 #include "ngtcp2_test_helper.h"
 #include "ngtcp2_mem.h"
+#include "ngtcp2_macro.h"
 
 void test_ngtcp2_rob_push(void) {
   ngtcp2_mem *mem = ngtcp2_mem_default();
+  ngtcp2_rnd *rnd = static_rnd();
   ngtcp2_rob rob;
   int rv;
   uint8_t data[256];
-  ngtcp2_rob_gap *g;
+  ngtcp2_skl_node *gn;
 
   /* Check range overlapping */
-  ngtcp2_rob_init(&rob, 64, mem);
+  ngtcp2_rob_init(&rob, 64, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 34567, data, 145);
 
   CU_ASSERT(0 == rv);
 
-  g = rob.gap;
+  gn = ngtcp2_skl_front(&rob.gapskl);
 
-  CU_ASSERT(0 == g->range.begin);
-  CU_ASSERT(34567 == g->range.end);
+  CU_ASSERT(0 == gn->range.begin);
+  CU_ASSERT(34567 == gn->range.end);
 
-  g = g->next;
+  gn = ngtcp2_skl_node_next(gn);
 
-  CU_ASSERT(34567 + 145 == g->range.begin);
-  CU_ASSERT(UINT64_MAX == g->range.end);
-  CU_ASSERT(NULL == g->next);
+  CU_ASSERT(34567 + 145 == gn->range.begin);
+  CU_ASSERT(UINT64_MAX == gn->range.end);
+  CU_ASSERT(NULL == ngtcp2_skl_node_next(gn));
 
   rv = ngtcp2_rob_push(&rob, 34565, data, 1);
 
   CU_ASSERT(0 == rv);
 
-  g = rob.gap;
+  gn = ngtcp2_skl_front(&rob.gapskl);
 
-  CU_ASSERT(0 == g->range.begin);
-  CU_ASSERT(34565 == g->range.end);
+  CU_ASSERT(0 == gn->range.begin);
+  CU_ASSERT(34565 == gn->range.end);
 
-  g = g->next;
+  gn = ngtcp2_skl_node_next(gn);
 
-  CU_ASSERT(34566 == g->range.begin);
-  CU_ASSERT(34567 == g->range.end);
+  CU_ASSERT(34566 == gn->range.begin);
+  CU_ASSERT(34567 == gn->range.end);
 
   rv = ngtcp2_rob_push(&rob, 34563, data, 1);
 
   CU_ASSERT(0 == rv);
 
-  g = rob.gap;
+  gn = ngtcp2_skl_front(&rob.gapskl);
 
-  CU_ASSERT(0 == g->range.begin);
-  CU_ASSERT(34563 == g->range.end);
+  CU_ASSERT(0 == gn->range.begin);
+  CU_ASSERT(34563 == gn->range.end);
 
-  g = g->next;
+  gn = ngtcp2_skl_node_next(gn);
 
-  CU_ASSERT(34564 == g->range.begin);
-  CU_ASSERT(34565 == g->range.end);
+  CU_ASSERT(34564 == gn->range.begin);
+  CU_ASSERT(34565 == gn->range.end);
 
   rv = ngtcp2_rob_push(&rob, 34561, data, 151);
 
   CU_ASSERT(0 == rv);
 
-  g = rob.gap;
+  gn = ngtcp2_skl_front(&rob.gapskl);
 
-  CU_ASSERT(0 == g->range.begin);
-  CU_ASSERT(34561 == g->range.end);
+  CU_ASSERT(0 == gn->range.begin);
+  CU_ASSERT(34561 == gn->range.end);
 
-  g = g->next;
+  gn = ngtcp2_skl_node_next(gn);
 
-  CU_ASSERT(34567 + 145 == g->range.begin);
-  CU_ASSERT(UINT64_MAX == g->range.end);
-  CU_ASSERT(NULL == g->next);
+  CU_ASSERT(34567 + 145 == gn->range.begin);
+  CU_ASSERT(UINT64_MAX == gn->range.end);
+  CU_ASSERT(NULL == ngtcp2_skl_node_next(gn));
 
   ngtcp2_rob_free(&rob);
 
   /* Check removing prefix */
-  ngtcp2_rob_init(&rob, 64, mem);
+  ngtcp2_rob_init(&rob, 64, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 0, data, 123);
 
   CU_ASSERT(0 == rv);
 
-  g = rob.gap;
+  gn = ngtcp2_skl_front(&rob.gapskl);
 
-  CU_ASSERT(123 == g->range.begin);
-  CU_ASSERT(UINT64_MAX == g->range.end);
-  CU_ASSERT(NULL == g->next);
+  CU_ASSERT(123 == gn->range.begin);
+  CU_ASSERT(UINT64_MAX == gn->range.end);
+  CU_ASSERT(NULL == ngtcp2_skl_node_next(gn));
 
   ngtcp2_rob_free(&rob);
 
   /* Check removing suffix */
-  ngtcp2_rob_init(&rob, 64, mem);
+  ngtcp2_rob_init(&rob, 64, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, UINT64_MAX - 123, data, 123);
 
   CU_ASSERT(0 == rv);
 
-  g = rob.gap;
+  gn = ngtcp2_skl_front(&rob.gapskl);
 
-  CU_ASSERT(0 == g->range.begin);
-  CU_ASSERT(UINT64_MAX - 123 == g->range.end);
-  CU_ASSERT(NULL == g->next);
+  CU_ASSERT(0 == gn->range.begin);
+  CU_ASSERT(UINT64_MAX - 123 == gn->range.end);
+  CU_ASSERT(NULL == ngtcp2_skl_node_next(gn));
 
   ngtcp2_rob_free(&rob);
 }
 
 void test_ngtcp2_rob_data_at(void) {
   ngtcp2_mem *mem = ngtcp2_mem_default();
+  ngtcp2_rnd *rnd = static_rnd();
   ngtcp2_rob rob;
   int rv;
   uint8_t data[256];
@@ -145,7 +148,7 @@ void test_ngtcp2_rob_data_at(void) {
     data[i] = (uint8_t)i;
   }
 
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 3, &data[3], 13);
 
@@ -184,7 +187,7 @@ void test_ngtcp2_rob_data_at(void) {
   ngtcp2_rob_free(&rob);
 
   /* Verify the case where data spans over multiple chunks */
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 0, &data[0], 47);
 
@@ -209,7 +212,7 @@ void test_ngtcp2_rob_data_at(void) {
 
   /* Verify the case where new offset comes before the existing
      chunk */
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 17, &data[17], 2);
 
@@ -237,7 +240,7 @@ void test_ngtcp2_rob_data_at(void) {
 
   /* Verify the case where new offset comes after the existing
      chunk */
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 0, &data[0], 3);
 
@@ -247,19 +250,20 @@ void test_ngtcp2_rob_data_at(void) {
 
   CU_ASSERT(0 == rv);
 
-  d = rob.data->next;
+  d = ngtcp2_struct_of(ngtcp2_skl_node_next(ngtcp2_skl_front(&rob.dataskl)),
+                       ngtcp2_rob_data, node);
 
-  CU_ASSERT(16 == d->offset);
+  CU_ASSERT(16 == d->node.range.begin);
 
-  d = d->next;
+  d = ngtcp2_struct_of(ngtcp2_skl_node_next(&d->node), ngtcp2_rob_data, node);
 
-  CU_ASSERT(32 == d->offset);
-  CU_ASSERT(NULL == d->next);
+  CU_ASSERT(32 == d->node.range.begin);
+  CU_ASSERT(NULL == ngtcp2_skl_node_next(&d->node));
 
   ngtcp2_rob_free(&rob);
 
   /* Severely scattered data */
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   for (i = 0; i < sizeof(data); i += 2) {
     rv = ngtcp2_rob_push(&rob, i, &data[i], 1);
@@ -281,13 +285,13 @@ void test_ngtcp2_rob_data_at(void) {
     ngtcp2_rob_pop(&rob, i * 16, len);
   }
 
-  CU_ASSERT(256 == rob.gap->range.begin);
-  CU_ASSERT(NULL == rob.data);
+  CU_ASSERT(256 == ngtcp2_skl_front(&rob.gapskl)->range.begin);
+  CU_ASSERT(NULL == ngtcp2_skl_front(&rob.dataskl));
 
   ngtcp2_rob_free(&rob);
 
   /* Verify the case where chunk is reused if it is not fully used */
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 0, &data[0], 5);
 
@@ -312,7 +316,7 @@ void test_ngtcp2_rob_data_at(void) {
   ngtcp2_rob_free(&rob);
 
   /* Verify the case where 2nd push covers already processed region */
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 0, &data[0], 16);
 
@@ -339,12 +343,15 @@ void test_ngtcp2_rob_data_at(void) {
 
 void test_ngtcp2_rob_remove_prefix(void) {
   ngtcp2_mem *mem = ngtcp2_mem_default();
+  ngtcp2_rnd *rnd = static_rnd();
   ngtcp2_rob rob;
+  ngtcp2_skl_node *gn;
   uint8_t data[256];
   int rv;
+  size_t i;
 
   /* Removing data which spans multiple chunks */
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 1, &data[1], 32);
 
@@ -352,13 +359,13 @@ void test_ngtcp2_rob_remove_prefix(void) {
 
   ngtcp2_rob_remove_prefix(&rob, 33);
 
-  CU_ASSERT(33 == rob.gap->range.begin);
-  CU_ASSERT(32 == rob.data->offset);
+  CU_ASSERT(33 == ngtcp2_skl_front(&rob.gapskl)->range.begin);
+  CU_ASSERT(32 == ngtcp2_skl_front(&rob.dataskl)->range.begin);
 
   ngtcp2_rob_free(&rob);
 
   /* Remove an entire gap */
-  ngtcp2_rob_init(&rob, 16, mem);
+  ngtcp2_rob_init(&rob, 16, rnd, mem);
 
   rv = ngtcp2_rob_push(&rob, 1, &data[1], 3);
 
@@ -370,8 +377,25 @@ void test_ngtcp2_rob_remove_prefix(void) {
 
   ngtcp2_rob_remove_prefix(&rob, 16);
 
-  CU_ASSERT(16 == rob.gap->range.begin);
-  CU_ASSERT(NULL == rob.gap->next);
+  gn = ngtcp2_skl_front(&rob.gapskl);
+  CU_ASSERT(16 == gn->range.begin);
+  CU_ASSERT(NULL == ngtcp2_skl_node_next(gn));
+
+  ngtcp2_rob_free(&rob);
+
+  (void)i;
+  ngtcp2_rob_init(&rob, 8 * 1024, rnd, mem);
+
+  for (i = 1; i < 1024 * 1024; i += 2) {
+    /* fprintf(stderr, "%zu\n", i); */
+    rv = ngtcp2_rob_push(&rob, i, &data[0], 1);
+  }
+  for (i = 1024 * 1024; i > 0; i -= 2) {
+    /* fprintf(stderr, "%zu\n", i); */
+    rv = ngtcp2_rob_push(&rob, i, &data[0], 1);
+  }
+  fprintf(stderr, "first_gap=%lu\n", ngtcp2_rob_first_gap_offset(&rob));
+  ngtcp2_skl_print(&rob.gapskl);
 
   ngtcp2_rob_free(&rob);
 }

@@ -274,3 +274,14 @@ void write_pkt_payloadlen(uint8_t *pkt, const ngtcp2_cid *dcid,
   ngtcp2_put_varint14(&pkt[1 + 4 + 1 + dcid->datalen + scid->datalen],
                       (uint16_t)payloadlen);
 }
+
+ngtcp2_rnd *static_rnd(void) {
+  static int initialized = 0;
+  static ngtcp2_rnd rnd;
+  if (!initialized) {
+    unsigned short xsubi[] = {0, 0, 0};
+    ngtcp2_rnd_init(&rnd, xsubi);
+    initialized = 1;
+  }
+  return &rnd;
+}

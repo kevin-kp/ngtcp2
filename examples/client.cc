@@ -444,6 +444,8 @@ int stream_close(ngtcp2_conn *conn, uint64_t stream_id, uint16_t app_error_code,
 
   c->on_stream_close(stream_id);
 
+  if (stream_id == 4)
+    c->disconnect();
   return 0;
 }
 } // namespace
